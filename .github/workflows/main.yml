@@ -1,0 +1,68 @@
+name: Weirdhost Auto Renew
+
+on:
+  schedule:
+    - cron: '0 18 * * *'  # 每天 UTC 18:00 (北京时间次日 2:00) 运行
+  workflow_dispatch:       # 允许手动触发
+
+jobs:
+  auto-renew:
+    runs-on: ubuntu-latest
+    
+    # 授予工作流适当的权限
+    permissions:
+      contents: write
+      actions: read
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        # 获取所有历史记录，以便能够推送更改
+        fetch-depth: 0
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        pip install playwright
+        playwright install chromium
+        
+    - name: Run auto renewal script
+      env:
+        REMEMBER_WEB_COOKIE: ${{ secrets.REMEMBER_WEB_COOKIE }}
+        WEIRDHOST_EMAIL: ${{ secrets.WEIRDHOST_EMAIL }}
+        WEIRDHOST_PASSWORD: ${{ secrets.WEIRDHOST_PASSWORD }}
+        WEIRDHOST_SERVER_URLS: ${{ secrets.WEIRDHOST_SERVER_URLS }}
+      run: python main.py
+      
+    - name: Commit and push if README changed
+      run: |
+        # 配置git用户
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # 检查README.md是否有更改
+        if git diff --exit-code --quiet README.md; then
+          echo "README.md没有变化，无需提交"
+        else
+          echo "检测到README.md有更改，正在提交..."
+          git add README.md
+          git commit -m "📝 自动更新运行状态: $(date +'%Y-%m-%d %H:%M:%S')"
+          git push
+        fi
+        
+    - name: Notify on failure
+      if: failure()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: '⚠️ 自动续期脚本执行失败，请检查日志。'
+          })
